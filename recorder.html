@@ -1,0 +1,34 @@
+<!doctype html>
+<html lang="ar" dir="rtl">
+<head>
+<meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>KIMZA Audio Recorder</title>
+<style>
+*{box-sizing:border-box}body{margin:0;background:#f6f5fc;color:#26334a;font-family:Tahoma,Arial,sans-serif;padding:20px}.card{max-width:520px;margin:24px auto;background:white;border:1px solid #e8e6f2;border-radius:22px;padding:24px;box-shadow:0 14px 40px #302b5e12}h1{font-size:23px;margin:8px 0}.muted{color:#718096;line-height:1.8;font-size:14px}.timer{font-size:38px;color:#7164c8;font-weight:bold;text-align:center;margin:18px}.btn{width:100%;padding:14px;border:0;border-radius:12px;font-size:16px;font-weight:bold;margin:6px 0;cursor:pointer}.primary{background:#7164c8;color:white}.secondary{background:#f0effa;color:#554ba7}.danger{background:#fff0f2;color:#b34358}.ok{background:#e9f7f1;color:#218b68}button:disabled{opacity:.45;cursor:not-allowed}audio{width:100%;margin:14px 0}.status{min-height:28px;font-size:13px;color:#718096;text-align:center}.live{color:#c65367;font-weight:bold}.brand{font-size:12px;letter-spacing:2px;color:#7164c8;font-weight:bold}
+</style></head><body>
+<div class="card"><div class="brand">KIMZA ACADEMY</div><h1>تسجيل الإجابة الصوتية</h1><p class="muted" id="intro">اضغط الزر أدناه للسماح باستخدام الميكروفون وبدء التسجيل. بعد الإيقاف، استمع إلى إجابتك ثم أرسلها إلى الاختبار.</p><div class="timer" id="timer">00:00</div><div class="status" id="status">جاهز لبدء التسجيل</div><button class="btn primary" id="start">السماح بالميكروفون وبدء التسجيل</button><button class="btn danger" id="stop" disabled>إيقاف التسجيل</button><audio id="preview" controls hidden></audio><button class="btn secondary" id="redo" hidden>إعادة التسجيل</button><button class="btn ok" id="send" hidden>استخدام هذا التسجيل</button></div>
+<script>
+const params=new URLSearchParams(location.search), attemptId=params.get('attemptId'), question=Number(params.get('question')), maxSeconds=Math.min(180,Math.max(1,Number(params.get('maxSeconds'))||90)), nonce=params.get('nonce'), parentOrigin=params.get('parentOrigin');
+const $=id=>document.getElementById(id);let stream=null,media=null,chunks=[],blob=null,url=null,seconds=0,tick=null;
+function fmt(n){return String(Math.floor(n/60)).padStart(2,'0')+':'+String(n%60).padStart(2,'0')}
+function status(s,live=false){$('status').textContent=s;$('status').className='status'+(live?' live':'')}
+async function start(){
+ if(!navigator.mediaDevices||!navigator.mediaDevices.getUserMedia){status('المتصفح لا يدعم الوصول إلى الميكروفون في هذه الصفحة.');return}
+ try{
+  stream=await navigator.mediaDevices.getUserMedia({audio:{channelCount:1,echoCancellation:true,noiseSuppression:true,autoGainControl:true}});
+  const types=['audio/webm;codecs=opus','audio/webm','audio/mp4'];const mime=types.find(t=>MediaRecorder.isTypeSupported(t));
+  media=mime?new MediaRecorder(stream,{mimeType:mime,audioBitsPerSecond:64000}):new MediaRecorder(stream,{audioBitsPerSecond:64000});chunks=[];seconds=0;
+  media.ondataavailable=e=>{if(e.data&&e.data.size)chunks.push(e.data)};
+  media.onstop=()=>{stream.getTracks().forEach(t=>t.stop());blob=new Blob(chunks,{type:media.mimeType||'audio/webm'});if(url)URL.revokeObjectURL(url);url=URL.createObjectURL(blob);$('preview').src=url;$('preview').hidden=false;$('redo').hidden=false;$('send').hidden=false;$('start').hidden=true;$('stop').disabled=true;status('تم التسجيل. استمع إلى إجابتك قبل الإرسال.');};
+  media.start(1000);$('start').disabled=true;$('stop').disabled=false;status('جارٍ التسجيل الآن...',true);$('timer').textContent=fmt(maxSeconds);
+  tick=setInterval(()=>{seconds++;$('timer').textContent=fmt(Math.max(0,maxSeconds-seconds));if(seconds>=maxSeconds)stop()},1000);
+ }catch(e){status('تعذّر الوصول إلى الميكروفون: '+(e.name==='NotAllowedError'?'اسمح للمتصفح باستخدام الميكروفون.':e.message));$('start').disabled=false;}
+}
+function stop(){if(tick)clearInterval(tick);if(media&&media.state!=='inactive')media.stop();$('stop').disabled=true}
+function redo(){if(url)URL.revokeObjectURL(url);url=null;blob=null;$('preview').removeAttribute('src');$('preview').hidden=true;$('redo').hidden=true;$('send').hidden=true;$('start').hidden=false;$('start').disabled=false;$('timer').textContent='00:00';status('يمكنك التسجيل مرة أخرى.')}
+function send(){if(!blob||!window.opener||window.opener.closed){status('تعذّر الاتصال بصفحة الاختبار. أغلق هذه النافذة وأعد فتح التسجيل من الاختبار.');return}
+ $('send').disabled=true;status('جارٍ تجهيز التسجيل للإرسال...');const reader=new FileReader();reader.onload=()=>{const base64=String(reader.result).split(',')[1];try{window.opener.postMessage({type:'KIMZA_ORAL_AUDIO',attemptId,question,nonce,base64,mimeType:blob.type,durationSeconds:Math.max(1,seconds)},parentOrigin);status('تم إرسال التسجيل إلى الاختبار.');$('send').textContent='تم الإرسال';}catch(e){status('تعذّر إرسال التسجيل: '+e.message);$('send').disabled=false}};reader.onerror=()=>{status('تعذّرت قراءة التسجيل.');$('send').disabled=false};reader.readAsDataURL(blob);
+}
+$('start').addEventListener('click',start);$('stop').addEventListener('click',stop);$('redo').addEventListener('click',redo);$('send').addEventListener('click',send);
+if(!attemptId||!question||!nonce||!parentOrigin){$('start').disabled=true;status('رابط التسجيل غير مكتمل. ارجع إلى الاختبار وافتح التسجيل من جديد.')}
+</script></body></html>
